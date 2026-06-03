@@ -19,7 +19,7 @@ x-airflow-common:
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     # DAG bundles: each is a separate, named bundle (shown individually in the UI).
     # Local: "dags-folder" (primary, /opt/airflow/dags) + extra2/extra3 (additional folders).
-    # Git: git1/git2 are appended ONLY when their GITn_REPO_URL is set in .env (via ${VAR:+...}),
+    # Git: git-1/git-2 are appended ONLY when their GIT_REPO_URL_n is set in .env (via ${VAR:+...}),
     # so leaving them unset means no git bundle and no errors.
     # Written multi-line for readability via a YAML folded scalar (>-): YAML joins the lines with
     # spaces into one string before Compose interpolates, so the result is the same as one long line.
@@ -27,13 +27,13 @@ x-airflow-common:
       [
       {"name": "dags-folder", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {}},
       {"name": "dags-folder-2", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-2"}},
-      {"name": "dags-folder-3", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-3"}}${GIT1_REPO_URL:+,
-      {"name": "git1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git1", "tracking_ref": "${GIT1_REF:-main}", "subdir": "${GIT1_SUBDIR:-dags}", "refresh_interval": 60}}}${GIT2_REPO_URL:+,
-      {"name": "git2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git2", "tracking_ref": "${GIT2_REF:-main}", "subdir": "${GIT2_SUBDIR:-dags}", "refresh_interval": 60}}}
+      {"name": "dags-folder-3", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-3"}}${GIT_REPO_URL_1:+,
+      {"name": "git-1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_1", "tracking_ref": "${GIT_TRACKING_REF_1:-main}", "subdir": "${GIT_SUBDIR_1:-dags}", "refresh_interval": 60}}}${GIT_REPO_URL_2:+,
+      {"name": "git-2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_2", "tracking_ref": "${GIT_TRACKING_REF_2:-main}", "subdir": "${GIT_SUBDIR_2:-dags}", "refresh_interval": 60}}}
       ]
-    # Git connections (SSH), one per git bundle. Each only used when its GITn_REPO_URL is set.
-    AIRFLOW_CONN_GIT1: '{"conn_type": "git", "host": "${GIT1_REPO_URL:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git1_key", "strict_host_key_checking": "no"}}'
-    AIRFLOW_CONN_GIT2: '{"conn_type": "git", "host": "${GIT2_REPO_URL:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git2_key", "strict_host_key_checking": "no"}}'
+    # Git connections (SSH), one per git bundle. Each only used when its GIT_REPO_URL_n is set.
+    AIRFLOW_CONN_GIT_1: '{"conn_type": "git", "host": "${GIT_REPO_URL_1:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_1_key", "strict_host_key_checking": "no"}}'
+    AIRFLOW_CONN_GIT_2: '{"conn_type": "git", "host": "${GIT_REPO_URL_2:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_2_key", "strict_host_key_checking": "no"}}'
   volumes:
     # Primary DAGs folder (bundle "dags-folder").
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
@@ -42,9 +42,9 @@ x-airflow-common:
     # Unused slots default to an auto-created empty dir (no DAGs, harmless).
     - ${DAGS_FOLDER_2:-./.extra_dags/dags-folder-2}:/opt/airflow/extra-dags/dags-folder-2
     - ${DAGS_FOLDER_3:-./.extra_dags/dags-folder-3}:/opt/airflow/extra-dags/dags-folder-3
-    # SSH private keys for the git bundles (read-only), one per bundle. Set GITn_SSH_KEY in .env.
-    - ${GIT1_SSH_KEY:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git1_key:ro
-    - ${GIT2_SSH_KEY:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git2_key:ro
+    # SSH private keys for the git bundles (read-only), one per bundle. Set GIT_SSH_KEY_n in .env.
+    - ${GIT_SSH_KEY_1:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git_1_key:ro
+    - ${GIT_SSH_KEY_2:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git_2_key:ro
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins

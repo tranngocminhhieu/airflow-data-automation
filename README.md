@@ -68,7 +68,7 @@ Các biến quan trọng trong `.env`:
 | `AIRFLOW_VERSION` | Version Airflow — nguồn duy nhất, dùng cho cả image lẫn venv |
 | `EXTERNAL_PYTHON` | Interpreter của venv business logic mà DAG sẽ dùng |
 | `DAGS_FOLDER_2` / `DAGS_FOLDER_3` | Thư mục DAG phụ trên host → DAG bundle riêng (tùy chọn) |
-| `GIT1_*` / `GIT2_*` | Cấu hình git DAG bundle qua SSH (tùy chọn, mặc định tắt) |
+| `GIT_*_1` / `GIT_*_2` | Cấu hình git DAG bundle qua SSH (tùy chọn, mặc định tắt) |
 | `AIRFLOW_UID` | UID chạy container (chạy `echo $(id -u)` để lấy) |
 | `FERNET_KEY` | Key mã hoá connection/password — **phải đổi** trước khi dùng |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Thông tin Postgres |
@@ -236,17 +236,17 @@ Ngoài thư mục local, một bundle có thể kéo DAG **trực tiếp từ gi
 không cần mount, Airflow tự clone và pull theo nhánh sau mỗi `refresh_interval`. Đây là cách
 production-grade nhất: dev push lên git, Airflow tự cập nhật.
 
-Có sẵn **2 slot git độc lập** (`git1`, `git2`), **mặc định tắt** (không gây lỗi). Mỗi slot bật
-riêng bằng cách **bỏ comment các dòng `GITn_*`** trong `.env` và điền giá trị thật:
+Có sẵn **2 slot git độc lập** (`git-1`, `git-2`), **mặc định tắt** (không gây lỗi). Mỗi slot bật
+riêng bằng cách **bỏ comment các dòng `GIT_*_n`** trong `.env` và điền giá trị thật:
 
 ```shell
-# Slot 1 -> bundle "git1"
-GIT1_REPO_URL=git@github.com:your-org/repo-a.git  # SSH URL của repo
-GIT1_REF=main                                     # nhánh/tag theo dõi (mặc định main)
-GIT1_SUBDIR=dags                                  # thư mục chứa DAG trong repo (mặc định dags)
-GIT1_SSH_KEY=/Users/me/.ssh/id_ed25519_a          # đường dẫn private key trên host
+# Slot 1 -> bundle "git-1"
+GIT_REPO_URL_1=git@github.com:your-org/repo-a.git  # SSH URL của repo
+GIT_TRACKING_REF_1=main                            # nhánh/tag theo dõi (mặc định main)
+GIT_SUBDIR_1=dags                                  # thư mục chứa DAG trong repo (mặc định dags)
+GIT_SSH_KEY_1=/Users/me/.ssh/id_ed25519_a          # đường dẫn private key trên host
 
-# Slot 2 -> bundle "git2" (tương tự, dùng GIT2_*)
+# Slot 2 -> bundle "git-2" (tương tự, dùng GIT_*_2)
 ```
 
 Rồi tạo lại container:
@@ -255,19 +255,19 @@ Rồi tạo lại container:
 docker compose up -d
 ```
 
-Cơ chế: bundle `gitN` chỉ được thêm vào danh sách khi `GITn_REPO_URL` có giá trị (dùng cú pháp
+Cơ chế: bundle `git-n` chỉ được thêm vào danh sách khi `GIT_REPO_URL_n` có giá trị (dùng cú pháp
 `${VAR:+...}` của Compose). Để trống → không có bundle đó, không lỗi. Khi bật, private key được
-mount read-only vào `/opt/airflow/git-ssh/gitN_key` và dùng qua connection `gitN`. Hai slot dùng
+mount read-only vào `/opt/airflow/git-ssh/git_n_key` và dùng qua connection `git_n`. Hai slot dùng
 key riêng nên có thể trỏ tới repo khác nhau với deploy key khác nhau.
 
-Cần nhiều hơn 2 git repo: thêm slot `git3` theo đúng pattern (một entry `${GIT3_REPO_URL:+...}`
-trong list, một connection `AIRFLOW_CONN_GIT3`, một mount key) trong `docker-compose.yaml`.
+Cần nhiều hơn 2 git repo: thêm slot `git-3` theo đúng pattern (một entry `${GIT_REPO_URL_3:+...}`
+trong list, một connection `AIRFLOW_CONN_GIT_3`, một mount key) trong `docker-compose.yaml`.
 
 Kiểm tra clone thành công:
 
 ```shell
-docker compose logs airflow-dag-processor | grep -iE "git1|git2"
-docker compose exec airflow-scheduler airflow dags list   # DAG sẽ hiện với bundle = git1 / git2
+docker compose logs airflow-dag-processor | grep -iE "git-1|git-2"
+docker compose exec airflow-scheduler airflow dags list   # DAG sẽ hiện với bundle = git-1 / git-2
 ```
 
 > Private key cần quyền `600` và không được commit lên git.
