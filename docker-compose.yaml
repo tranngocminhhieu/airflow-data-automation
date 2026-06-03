@@ -28,8 +28,8 @@ x-airflow-common:
       {"name": "dags-folder", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {}},
       {"name": "dags-folder-2", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-2"}},
       {"name": "dags-folder-3", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-3"}}${GIT_REPO_URL_1:+,
-      {"name": "git-1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_1", "tracking_ref": "${GIT_TRACKING_REF_1:-main}", "subdir": "${GIT_SUBDIR_1:-dags}", "refresh_interval": 60}}}${GIT_REPO_URL_2:+,
-      {"name": "git-2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_2", "tracking_ref": "${GIT_TRACKING_REF_2:-main}", "subdir": "${GIT_SUBDIR_2:-dags}", "refresh_interval": 60}}}
+      {"name": "git-1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_1", "tracking_ref": "${GIT_TRACKING_REF_1:-main}", "subdir": "${GIT_SUBDIR_1:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_1:-60}}}}${GIT_REPO_URL_2:+,
+      {"name": "git-2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_2", "tracking_ref": "${GIT_TRACKING_REF_2:-main}", "subdir": "${GIT_SUBDIR_2:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_2:-60}}}}
       ]
     # Git connections (SSH), one per git bundle. Each only used when its GIT_REPO_URL_n is set.
     AIRFLOW_CONN_GIT_1: '{"conn_type": "git", "host": "${GIT_REPO_URL_1:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_1_key", "strict_host_key_checking": "no"}}'
