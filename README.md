@@ -236,6 +236,38 @@ Ngoài thư mục local, một bundle có thể kéo DAG **trực tiếp từ gi
 không cần mount, Airflow tự clone và pull theo nhánh sau mỗi `refresh_interval`. Đây là cách
 production-grade nhất: dev push lên git, Airflow tự cập nhật.
 
+#### Tạo SSH key (deploy key)
+
+Airflow cần một SSH **private key** để clone repo. Tạo một cặp key riêng cho việc này (không đặt
+passphrase để Airflow dùng tự động được):
+
+```shell
+ssh-keygen -t ed25519 -C "airflow-git-1" -f ~/.ssh/airflow_git_1 -N ""
+```
+
+Lệnh trên sinh ra 2 file:
+
+- `~/.ssh/airflow_git_1` — **private key** (trỏ `GIT_SSH_KEY_1` tới file này).
+- `~/.ssh/airflow_git_1.pub` — **public key** (đăng ký lên git remote).
+
+Thêm public key vào repo dưới dạng **deploy key** (chỉ cần quyền read):
+
+- GitHub: repo → **Settings → Deploy keys → Add deploy key**, dán nội dung file `.pub`.
+- GitLab: repo → **Settings → Repository → Deploy keys**.
+
+Đảm bảo private key có quyền `600`:
+
+```shell
+chmod 600 ~/.ssh/airflow_git_1
+```
+
+> Mỗi slot nên dùng một deploy key riêng (GitHub deploy key gắn theo từng repo). Slot 2 tạo key
+> tương tự (`airflow_git_2`) rồi trỏ `GIT_SSH_KEY_2`.
+
+> Setup này đã đặt `strict_host_key_checking: no` nên không cần thêm host key vào `known_hosts`.
+
+#### Bật bundle
+
 Có sẵn **2 slot git độc lập** (`git-1`, `git-2`), **mặc định tắt** (không gây lỗi). Mỗi slot bật
 riêng bằng cách **bỏ comment các dòng `GIT_*_n`** trong `.env` và điền giá trị thật:
 
