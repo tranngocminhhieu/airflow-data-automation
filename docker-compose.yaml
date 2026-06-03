@@ -109,8 +109,8 @@ services:
       resources:
         limits:
           # LocalExecutor runs tasks directly on the scheduler, so it needs more resources
-          cpus: '2'
-          memory: 2G
+          cpus: '8'
+          memory: 6G
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
