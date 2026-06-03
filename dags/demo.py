@@ -3,37 +3,37 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-# Venv riêng cho business logic, nằm trên volume persist trong container.
-# Tách biệt env của Airflow nên cài thêm package không ảnh hưởng Airflow,
-# không cần restart/rebuild:
+# Dedicated venv for business logic, on a persistent volume inside the container.
+# Isolated from Airflow's own env, so installing extra packages never affects
+# Airflow and needs no restart/rebuild:
 #   docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install <package>
-# Path lấy từ biến EXTERNAL_PYTHON trong .env (có default phòng khi thiếu).
+# Path comes from EXTERNAL_PYTHON in .env (with a fallback default).
 EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON", "/opt/airflow/pyenv/venv/bin/python3")
 
 
 # =========================================================
-# Business logic (CLI mode: chạy thuần Python)
+# Business logic (CLI mode: plain Python)
 # =========================================================
 
 def extract_customers():
     import pandas as pd
     import requests
     print("Extract customers")
-    # code thật ở đây
+    # real code here
 
 
 def clean_customers():
     import pandas as pd
 
     print("Clean customers")
-    # code thật ở đây
+    # real code here
 
 
 def load_customers():
     import sqlalchemy
 
     print("Load customers")
-    # code thật ở đây
+    # real code here
 
 
 def main():
@@ -44,10 +44,10 @@ def main():
 
 # =========================================================
 # Airflow mode: TaskFlow API + @task.external_python
-# Tái sử dụng đúng các hàm business logic tách riêng ở trên: bọc chúng
-# bằng task.external_python để chạy bằng interpreter của venv EXTERNAL_PYTHON.
-# Decorator lấy source của hàm (inspect.getsource), mà các hàm đã
-# self-contained (import nằm bên trong) nên chạy trong venv được.
+# Reuses the same separated business-logic functions above: wrap them with
+# task.external_python so they run under the EXTERNAL_PYTHON venv interpreter.
+# The decorator captures each function's source (inspect.getsource); since the
+# functions are self-contained (imports inside), they run fine in the venv.
 # =========================================================
 
 try:

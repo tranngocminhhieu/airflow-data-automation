@@ -1,332 +1,217 @@
 # Airflow Data Automation
 
-Deploy Apache Airflow (LocalExecutor) trên một server duy nhất, tùy chỉnh sẵn cho
-**BI Engineer / Analytics Engineer** — những người đã quen Python + Cron và giờ cần một
-trình điều phối (orchestrator) đúng nghĩa nhưng không muốn dựng hạ tầng phức tạp.
+Single-server Apache Airflow (LocalExecutor) deployment, pre-tuned for
+**BI / Analytics Engineers** — people already comfortable with Python + Cron who now
+need a real orchestrator without standing up complex infrastructure.
 
-Điểm khác biệt so với cách dùng Airflow thông thường: business logic của pipeline chạy
-trong một **Python environment riêng, tách biệt với Airflow**. Nhờ vậy bạn có thể cài thêm
-package cho pipeline bất cứ lúc nào mà **không cần build lại image, không cần restart Airflow**,
-và bản thân Airflow luôn ổn định.
+What makes it different from a vanilla Airflow setup: your pipeline's business logic runs
+in a **dedicated Python environment, isolated from Airflow itself**. You can install extra
+packages for your pipelines **anytime — no image rebuild, no Airflow restart** — and Airflow
+stays stable regardless.
 
-## Tính năng chính
+## Highlights
 
-- **Deploy gọn**: chỉ cần Docker, một server, vài lệnh.
-- **1 pipeline = 1 file Python**: chạy được cả bằng CLI (`python file.py`) lẫn Airflow.
-- **Python env tách biệt**: business logic chạy trong venv riêng (`/opt/airflow/pyenv/venv`),
-  không đụng tới env của Airflow.
-- **`pip install` bất cứ lúc nào**: cài thêm package cho pipeline mà không rebuild / restart;
-  package persist qua restart nhờ Docker volume.
-- **Nhiều nguồn DAG**: ngoài thư mục `./dags` mặc định, gắn thêm thư mục khác trên host hoặc git
-  repo (qua SSH) làm DAG bundle riêng — chỉ cần khai báo trong `.env`.
+- **Lean deploy**: just Docker, one server, a few commands.
+- **1 pipeline = 1 Python file**: runs both as a CLI (`python file.py`) and as an Airflow DAG.
+- **Isolated Python env**: business logic runs in its own venv (`/opt/airflow/pyenv/venv`),
+  never touching Airflow's environment.
+- **`pip install` anytime**: add pipeline packages without rebuild/restart; they persist
+  across restarts via a Docker volume.
+- **Multiple DAG sources**: beyond the default `./dags`, attach extra host folders or git
+  repos (over SSH) as separate DAG bundles — declared entirely in `.env`.
 
-## Kiến trúc
+## Architecture
 
-| Thành phần | Vai trò |
+| Service | Role |
 |---|---|
-| `postgres` | Metadata database của Airflow |
-| `airflow-apiserver` | Web UI + REST API (cổng `127.0.0.1:8080`) |
-| `airflow-scheduler` | Lên lịch và chạy task (LocalExecutor chạy task ngay trên scheduler) |
-| `airflow-dag-processor` | Parse DAG từ thư mục DAG |
-| `airflow-triggerer` | Xử lý deferrable operators |
-| `airflow-init` | Khởi tạo DB, tạo user admin, dựng sẵn venv business logic |
+| `postgres` | Airflow metadata database |
+| `airflow-apiserver` | Web UI + REST API (bound to `127.0.0.1:8080`) |
+| `airflow-scheduler` | Schedules and runs tasks (LocalExecutor runs tasks on the scheduler) |
+| `airflow-dag-processor` | Parses DAGs from the DAG folders/bundles |
+| `airflow-triggerer` | Handles deferrable operators |
+| `airflow-init` | Initializes the DB, creates the admin user, builds the business-logic venv |
 
-Business logic được chạy qua `ExternalPythonOperator` / `@task.external_python`, trỏ tới
-interpreter của venv riêng thay vì Python của Airflow.
+Business logic runs via `ExternalPythonOperator` / `@task.external_python`, pointed at the
+dedicated venv interpreter rather than Airflow's own Python:
 
 ```
 ┌───────────────────────────────┐
-│ Airflow (image apache/airflow)│  ← Python của Airflow, KHÔNG đụng vào
+│ Airflow (apache/airflow image)│  ← Airflow's own Python, left untouched
 │  scheduler / apiserver / ...  │
 │                               │
 │   @task.external_python  ─────┼──► /opt/airflow/pyenv/venv/bin/python3
-└───────────────────────────────┘        ↑ venv riêng cho business logic
-                                        (pip install thoải mái, persist qua volume)
+└───────────────────────────────┘        ↑ dedicated business-logic venv
+                                        (pip install freely, persists on a volume)
 ```
 
-## Yêu cầu
+The full service definition lives in [`docker-compose.yaml`](docker-compose.yaml).
+
+## Requirements
 
 - Docker + Docker Compose
-- (Khuyến nghị deploy production trên Linux server)
+- Production deploys are recommended on a Linux server
 
-## Cấu trúc thư mục
+## Project layout
 
 ```
 .
-├── docker-compose.yaml      # Định nghĩa toàn bộ service
-├── .env                     # Cấu hình (KHÔNG commit lên git)
-├── dags/                    # Thư mục DAG mặc định (bundle "dags-folder")
-│   └── demo.py              # Pipeline mẫu (CLI + Airflow)
+├── docker-compose.yaml      # All service definitions
+├── .env_example             # Config template — copy to .env
+├── .env                     # Real config (DO NOT commit)
+├── .placeholder_ssh_key     # Dummy key, default git-bundle mount when disabled
+├── LICENSE
+└── dags/                    # Default DAG folder (bundle "dags-folder")
+    └── demo.py              # Sample pipeline (CLI + Airflow)
 ```
 
-## Cấu hình (`.env`)
+## Configuration
 
-Các biến quan trọng trong `.env`:
+All configuration lives in `.env`. Start from the template:
 
-| Biến | Ý nghĩa |
-|---|---|
-| `AIRFLOW_VERSION` | Version Airflow — nguồn duy nhất, dùng cho cả image lẫn venv |
-| `EXTERNAL_PYTHON` | Interpreter của venv business logic mà DAG sẽ dùng |
-| `DAGS_FOLDER_2` / `DAGS_FOLDER_3` | Thư mục DAG phụ trên host → DAG bundle riêng (tùy chọn) |
-| `GIT_*_1` / `GIT_*_2` | Cấu hình git DAG bundle qua SSH (tùy chọn, mặc định tắt) |
-| `AIRFLOW_UID` | UID chạy container (chạy `echo $(id -u)` để lấy) |
-| `FERNET_KEY` | Key mã hoá connection/password — **phải đổi** trước khi dùng |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Thông tin Postgres |
-| `_AIRFLOW_WWW_USER_USERNAME` / `_AIRFLOW_WWW_USER_PASSWORD` | Tài khoản admin web UI |
+```shell
+cp .env_example .env
+```
 
-> ⚠️ Trước khi deploy, hãy thay tất cả các giá trị `REPLACE_WITH_...` và sinh `FERNET_KEY` mới:
-> ```shell
-> python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-> ```
+Every variable is documented inline in [`.env_example`](.env_example) — read it there rather
+than duplicating the list here. Before deploying, replace **all** `REPLACE_WITH_...` values and
+generate a fresh `FERNET_KEY`:
+
+```shell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
 ## Deployment
 
-Khởi tạo lần đầu (migrate DB, tạo user admin, dựng venv business logic):
+First-time init (DB migration, admin user, business-logic venv):
 
 ```shell
 docker compose up airflow-init
 ```
 
-Chạy toàn bộ stack:
+Start the full stack:
 
 ```shell
 docker compose up -d
 ```
 
-Mở Web UI tại http://127.0.0.1:8080 và đăng nhập bằng tài khoản admin trong `.env`.
+Open the Web UI at http://127.0.0.1:8080 and log in with the admin account from `.env`.
 
-## Viết DAG
+## Writing a DAG
 
-Mỗi pipeline là một file Python chạy được theo 2 chế độ. Xem `dags/demo.py` làm mẫu:
+Each pipeline is a single Python file that runs in two modes. See
+[`dags/demo.py`](dags/demo.py) for the full, working sample — the key points:
 
-```python
-from __future__ import annotations
+- **Business logic = self-contained functions.** Every `import` goes *inside* the function,
+  and the body must not reference names from the outer scope. Reason: `@task.external_python`
+  captures the function's *source* (`inspect.getsource`) and runs it under the venv
+  interpreter, so outer-scope names won't exist at execution time.
+- **Airflow mode** wraps those same functions with `task.external_python(python=EXTERNAL_PYTHON)`,
+  guarded by a `try/except ModuleNotFoundError` so the file still runs as a plain CLI script.
 
-import os
-from datetime import datetime
-
-EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON", "/opt/airflow/pyenv/venv/bin/python3")
-
-
-# --- Business logic: hàm self-contained (import nằm BÊN TRONG hàm) ---
-def extract_customers():
-    import pandas as pd
-    print("Extract customers")
-
-
-def clean_customers():
-    print("Clean customers")
-
-
-def main():
-    extract_customers()
-    clean_customers()
-
-
-# --- Airflow mode: TaskFlow API + @task.external_python ---
-try:
-    from airflow.sdk import dag, task
-
-    @dag(
-        dag_id="customer_pipeline",
-        start_date=datetime(2026, 1, 1),
-        schedule="@daily",
-        catchup=False,
-        tags=["customer"],
-    )
-    def customer_pipeline():
-        extract = task.external_python(python=EXTERNAL_PYTHON)(extract_customers)
-        clean = task.external_python(python=EXTERNAL_PYTHON)(clean_customers)
-        extract() >> clean()
-
-    customer_pipeline()
-except ModuleNotFoundError:
-    pass
-
-
-if __name__ == "__main__":
-    main()
-```
-
-Chạy nhanh bằng CLI để test logic, không cần Airflow:
+Quick logic test without Airflow:
 
 ```shell
 python dags/demo.py
 ```
 
-**Lưu ý quan trọng khi dùng `@task.external_python`**: thân hàm phải *self-contained* —
-mọi `import` đặt bên trong hàm, không tham chiếu biến/hàm ở scope ngoài. Lý do: decorator lấy
-*source code* của đúng hàm đó (`inspect.getsource`) rồi chạy bằng interpreter của venv, nên các
-tên ngoài hàm sẽ không tồn tại trong môi trường thực thi.
+## Managing the Python environment
 
-## Quản lý Python environment
+A default venv is created at `/opt/airflow/pyenv/venv` with `apache-airflow` matching the
+image version. It lives on a Docker volume, so it **persists across restarts**.
 
-Khi deploy, một venv mặc định đã được tạo sẵn tại `/opt/airflow/pyenv/venv`, đã cài
-`apache-airflow` cùng version với image. Venv này nằm trên Docker volume nên **persist qua restart**.
-
-### Cài thêm package
+Install extra packages (takes effect on the next task run — no restart, no rebuild):
 
 ```shell
 docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install <package>
 ```
 
-Package có hiệu lực ngay ở lần chạy task kế tiếp — không cần restart hay rebuild.
-
-### Tạo venv riêng cho pipeline đặc biệt
+Need an isolated venv for a special pipeline? Create it under `/opt/airflow/pyenv/` (so it sits
+on the persistent volume), install `apache-airflow` at the same `AIRFLOW_VERSION`, then point
+the DAG's `EXTERNAL_PYTHON` at the new interpreter:
 
 ```shell
-# Đặt trong /opt/airflow/pyenv/ để nằm trên volume persist
 docker compose exec airflow-scheduler python -m venv /opt/airflow/pyenv/venv-special
-
-# Cài apache-airflow (cùng version với image, để ExternalPythonOperator có context)
 docker compose exec airflow-scheduler /opt/airflow/pyenv/venv-special/bin/pip install --upgrade pip
-docker compose exec airflow-scheduler /opt/airflow/pyenv/venv-special/bin/pip install "apache-airflow==3.2.2"
+docker compose exec airflow-scheduler /opt/airflow/pyenv/venv-special/bin/pip install "apache-airflow==${AIRFLOW_VERSION}"
 ```
-
-Sau đó trỏ DAG tới interpreter của venv mới:
 
 ```python
 EXTERNAL_PYTHON = "/opt/airflow/pyenv/venv-special/bin/python3"
 ```
 
-## Thư mục DAG & nhiều nguồn (DAG bundles)
+## DAG sources (bundles)
 
-Thư mục DAG chính mặc định là `./dags` trong repo (bundle `dags-folder`), không cần cấu hình gì.
+The default DAG folder is `./dags` (bundle `dags-folder`) — no config needed.
 
-Khi DAG nằm rải rác ở các thư mục khác trên máy, mỗi thư mục được khai báo là một **DAG bundle**
-riêng — một tính năng của Airflow 3. Mỗi bundle có tên riêng và hiển thị tách biệt trong Web UI
-(cột *Bundle*), tiện theo dõi DAG đến từ nguồn nào.
+When DAGs live elsewhere, each source is registered as its own **DAG bundle** (an Airflow 3
+feature) with a distinct name, shown separately in the Web UI's *Bundle* column. Everything is
+driven from `.env`; the wiring is in
+[`AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST`](docker-compose.yaml).
 
-Chỉ cần khai báo path các thư mục phụ trong `.env`:
+### Extra host folders
 
-```shell
-DAGS_FOLDER_2=/Users/me/marketing/dags  # bundle "dags-folder-2"
-DAGS_FOLDER_3=/Users/me/finance/dags    # bundle "dags-folder-3"
-```
+Point the optional `DAGS_FOLDER_2` / `DAGS_FOLDER_3` variables (see [`.env_example`](.env_example))
+at folders on the host. Each is mounted **outside** `/opt/airflow/dags` (so the primary bundle
+doesn't scan it twice) and registered as bundle `dags-folder-2` / `dags-folder-3`. Unused slots
+default to an auto-created empty dir (harmless). Need more than two? Add a mount and a matching
+list entry in `docker-compose.yaml`.
 
-Cơ chế: mỗi thư mục phụ được mount vào một path **ngoài** `/opt/airflow/dags`
-(`/opt/airflow/extra-dags/dags-folder-N`) để bundle chính không quét trùng, rồi đăng ký thành bundle qua
-biến `AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST` trong `docker-compose.yaml`. Slot nào không
-khai báo sẽ tự mount một thư mục rỗng (vô hại).
+> ⚠️ `dag_id` must be **unique across all bundles** — duplicates cause import errors.
 
-Cần thêm nhiều hơn: thêm một mount mới trong `docker-compose.yaml` và thêm một entry tương ứng
-vào `AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST`.
+> Note (macOS): if a folder lives outside Docker Desktop's shared paths (e.g. outside `/Users`),
+> add it under **Docker Desktop → Settings → Resources → File Sharing**.
 
-Sau khi đổi, tạo lại container:
+### Git bundles (SSH)
 
-```shell
-docker compose up -d
-```
+A bundle can pull DAGs **directly from a git remote** (`GitDagBundle`) — no mount; Airflow
+clones and pulls the tracked branch every `refresh_interval`. This is the most production-grade
+option: devs push to git, Airflow updates itself.
 
-Kiểm tra DAG thuộc bundle nào:
-
-```shell
-docker compose exec airflow-scheduler airflow dags list
-```
-
-> ⚠️ `dag_id` phải là **duy nhất trên toàn bộ các bundle**. Hai DAG trùng `dag_id` (kể cả ở thư
-> mục khác nhau) sẽ gây import error.
-
-> Lưu ý (macOS): nếu thư mục nằm ngoài các path Docker Desktop share sẵn (vd ngoài `/Users`),
-> cần thêm nó vào **Docker Desktop → Settings → Resources → File Sharing**.
-
-### Bundle kéo trực tiếp từ git (SSH)
-
-Ngoài thư mục local, một bundle có thể kéo DAG **trực tiếp từ git remote** (`GitDagBundle`) —
-không cần mount, Airflow tự clone và pull theo nhánh sau mỗi `refresh_interval`. Đây là cách
-production-grade nhất: dev push lên git, Airflow tự cập nhật.
-
-#### Tạo SSH key (deploy key)
-
-Airflow cần một SSH **private key** để clone repo. Tạo một cặp key riêng cho việc này (không đặt
-passphrase để Airflow dùng tự động được):
+**Create a deploy key.** Airflow needs an SSH private key to clone. Generate a dedicated key
+pair (no passphrase, so Airflow can use it unattended):
 
 ```shell
 ssh-keygen -t ed25519 -C "airflow-git-1" -f ~/.ssh/airflow_git_1 -N ""
-```
-
-Lệnh trên sinh ra 2 file:
-
-- `~/.ssh/airflow_git_1` — **private key** (trỏ `GIT_SSH_KEY_1` tới file này).
-- `~/.ssh/airflow_git_1.pub` — **public key** (đăng ký lên git remote).
-
-Thêm public key vào repo dưới dạng **deploy key** (chỉ cần quyền read):
-
-- GitHub: repo → **Settings → Deploy keys → Add deploy key**, dán nội dung file `.pub`.
-- GitLab: repo → **Settings → Repository → Deploy keys**.
-
-Đảm bảo private key có quyền `600`:
-
-```shell
 chmod 600 ~/.ssh/airflow_git_1
 ```
 
-> Mỗi slot nên dùng một deploy key riêng (GitHub deploy key gắn theo từng repo). Slot 2 tạo key
-> tương tự (`airflow_git_2`) rồi trỏ `GIT_SSH_KEY_2`.
+- `~/.ssh/airflow_git_1` — **private key** → point `GIT_SSH_KEY_1` at it.
+- `~/.ssh/airflow_git_1.pub` — **public key** → register on the remote as a read-only deploy key
+  (GitHub: *Settings → Deploy keys*; GitLab: *Settings → Repository → Deploy keys*).
 
-> Setup này đã đặt `strict_host_key_checking: no` nên không cần thêm host key vào `known_hosts`.
+Each slot should use its own deploy key (GitHub deploy keys are per-repo). The setup uses
+`strict_host_key_checking: no`, so no `known_hosts` entry is needed.
 
-#### Bật bundle
-
-Có sẵn **2 slot git độc lập** (`git-1`, `git-2`), **mặc định tắt** (không gây lỗi). Mỗi slot bật
-riêng bằng cách **bỏ comment các dòng `GIT_*_n`** trong `.env` và điền giá trị thật:
-
-```shell
-# Slot 1 -> bundle "git-1"
-GIT_REPO_URL_1=git@github.com:your-org/repo-a.git  # SSH URL của repo
-GIT_TRACKING_REF_1=main                            # nhánh/tag theo dõi (mặc định main)
-GIT_SUBDIR_1=dags                                  # thư mục chứa DAG trong repo (mặc định dags)
-GIT_SSH_KEY_1=/Users/me/.ssh/id_ed25519_a          # đường dẫn private key trên host
-
-# Slot 2 -> bundle "git-2" (tương tự, dùng GIT_*_2)
-```
-
-Rồi tạo lại container:
+**Enable a slot.** Two independent slots (`git-1`, `git-2`) ship **disabled by default** (no
+errors when off). Uncomment and fill the `GIT_*_n` block in [`.env_example`](.env_example) →
+`.env`. A bundle is added only when its `GIT_REPO_URL_n` is set (via Compose's `${VAR:+...}`),
+so leaving a slot blank means no bundle and no error. Then recreate:
 
 ```shell
 docker compose up -d
 ```
 
-Cơ chế: bundle `git-n` chỉ được thêm vào danh sách khi `GIT_REPO_URL_n` có giá trị (dùng cú pháp
-`${VAR:+...}` của Compose). Để trống → không có bundle đó, không lỗi. Khi bật, private key được
-mount read-only vào `/opt/airflow/git-ssh/git_n_key` và dùng qua connection `git_n`. Hai slot dùng
-key riêng nên có thể trỏ tới repo khác nhau với deploy key khác nhau.
+Need more than two repos? Add a `git-3` slot following the same pattern (a `${GIT_REPO_URL_3:+...}`
+list entry, an `AIRFLOW_CONN_GIT_3` connection, and a key mount) in `docker-compose.yaml`.
 
-Cần nhiều hơn 2 git repo: thêm slot `git-3` theo đúng pattern (một entry `${GIT_REPO_URL_3:+...}`
-trong list, một connection `AIRFLOW_CONN_GIT_3`, một mount key) trong `docker-compose.yaml`.
-
-Kiểm tra clone thành công:
+## Operations
 
 ```shell
-docker compose logs airflow-dag-processor | grep -iE "git-1|git-2"
-docker compose exec airflow-scheduler airflow dags list   # DAG sẽ hiện với bundle = git-1 / git-2
-```
-
-> Private key cần quyền `600` và không được commit lên git.
-
-## Một số lệnh vận hành
-
-```shell
-# Xem danh sách DAG
+# List DAGs (shows which bundle each belongs to)
 docker compose exec airflow-scheduler airflow dags list
 
-# Kiểm tra lỗi import DAG
+# Check DAG import errors
 docker compose exec airflow-scheduler airflow dags list-import-errors
 
-# Trigger thủ công một DAG
+# Trigger a DAG manually
 docker compose exec airflow-scheduler airflow dags trigger <dag_id>
 
-# Xem log realtime
+# Tail logs
 docker compose logs -f airflow-scheduler
 
-# Dừng stack
+# Stop the stack
 docker compose down
 
-# Dừng và xoá cả volume (mất venv + metadata DB)
+# Stop and drop volumes (loses the venv + metadata DB)
 docker compose down -v
 ```
-
-## Executor
-
-Sử dụng **LocalExecutor** — task chạy trực tiếp trên scheduler. Phù hợp cho mô hình một server;
-scheduler được cấp nhiều tài nguyên hơn các service khác (xem `docker-compose.yaml`).

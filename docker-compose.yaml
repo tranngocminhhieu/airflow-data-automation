@@ -181,7 +181,8 @@ services:
           /opt/airflow/pyenv/venv/bin/pip install --upgrade pip
           /opt/airflow/pyenv/venv/bin/pip install "apache-airflow==${AIRFLOW_VERSION}"
         fi
-        chown -R "${AIRFLOW_UID}:0" /opt/airflow/
+        # chown only the dirs we own; avoid recursing into /opt/airflow/git-ssh
+        # (read-only key mounts would error with "Read-only file system").
         chown -v -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config,pyenv}
     environment:
       <<: *airflow-common-env
