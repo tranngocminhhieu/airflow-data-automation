@@ -1,21 +1,10 @@
-from __future__ import annotations
-
 import os
 from datetime import datetime, timedelta
 
-# Interpreter of the business-logic venv (set in docker-compose.yaml), used by external_python.
-EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON", "/opt/airflow/pyenv/venv/bin/python3")
-
-# Working dir for large data passed between tasks: steps exchange a parquet PATH via XCom
-# (small), never the data itself. Resolved relative to this file so it's always ./data —
-# /opt/airflow/data in the container (a host bind mount) == the repo's ./data on the host.
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-
 
 # === Business logic ===
-# Self-contained (imports inside) so external_python can run the source under the venv.
 # pandas + pyarrow aren't in the default venv; install once:
-#   docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install pandas pyarrow
+# docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install pandas pyarrow
 
 def extract_customers(workdir):
     import pandas as pd
@@ -54,25 +43,25 @@ def load_customers(in_path):
 
 
 def main():
-    # CLI run: stage in ./data and keep the files so you can open the parquet output.
-    load_customers(clean_customers(extract_customers(DATA_DIR)))
+    load_customers(clean_customers(extract_customers('../data')))
 
-
-# === Airflow mode ===
-# __name__ guard: `python demo.py` runs CLI only and never builds the DAG (even with Airflow
-# installed). Airflow imports the file as a module, which is when the DAG registers.
-# Same 3 steps as main(), wrapped to run under the venv; only parquet PATHS flow through XCom.
 
 if __name__ == "__main__":
     main()
+
+
+# === Airflow mode ===
 else:
     from airflow.sdk import dag, task
+
+    EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON")
 
     default_args = {
         "owner": "Airflow",
         "retries": 3,
         "retry_delay": timedelta(minutes=1),
     }
+
 
     @dag(
         dag_id="demo_pipeline",
@@ -87,6 +76,6 @@ else:
         clean = task.external_python(python=EXTERNAL_PYTHON)(clean_customers)
         load = task.external_python(python=EXTERNAL_PYTHON)(load_customers)
 
-        load(clean(extract(DATA_DIR)))  # same shape as main()
+        load(clean(extract('/opt/airflow/data')))
 
     customer_pipeline_taskapi()
