@@ -1,76 +1,92 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# Dedicated venv for business logic, on a persistent volume inside the container.
-# Isolated from Airflow's own env, so installing extra packages never affects
-# Airflow and needs no restart/rebuild:
-#   docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install <package>
-# Path comes from EXTERNAL_PYTHON in .env (with a fallback default).
+# Interpreter of the business-logic venv (set in docker-compose.yaml), used by external_python.
 EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON", "/opt/airflow/pyenv/venv/bin/python3")
 
+# Working dir for large data passed between tasks: steps exchange a parquet PATH via XCom
+# (small), never the data itself. Resolved relative to this file so it's always ./data —
+# /opt/airflow/data in the container (a host bind mount) == the repo's ./data on the host.
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
-# =========================================================
-# Business logic (CLI mode: plain Python)
-# =========================================================
 
-def extract_customers():
+# === Business logic ===
+# Self-contained (imports inside) so external_python can run the source under the venv.
+# pandas + pyarrow aren't in the default venv; install once:
+#   docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install pandas pyarrow
+
+def extract_customers(workdir):
     import pandas as pd
-    import requests
-    print("Extract customers")
-    # real code here
+
+    df = pd.DataFrame(
+        [
+            {"id": 1, "name": " alice ", "email": "ALICE@example.com", "spend": 120.5},
+            {"id": 2, "name": "bob", "email": "bob@example.com", "spend": None},
+            {"id": 3, "name": " carol", "email": None, "spend": 80.0},
+        ]
+    )
+    path = f"{workdir}/customers_raw.parquet"
+    df.to_parquet(path)
+    print(f"Extracted {len(df)} rows -> {path}")
+    return path
 
 
-def clean_customers():
+def clean_customers(in_path):
     import pandas as pd
 
-    print("Clean customers")
-    # real code here
+    df = pd.read_parquet(in_path)
+    df["name"] = df["name"].str.strip().str.title()
+    df["spend"] = df["spend"].fillna(0.0)
+    df = df.dropna(subset=["email"])  # drop customers without an email
+    out_path = in_path.replace("_raw", "_clean")
+    df.to_parquet(out_path)
+    print(f"Cleaned -> {len(df)} rows -> {out_path}")
+    return out_path
 
 
-def load_customers():
-    import sqlalchemy
+def load_customers(in_path):
+    import pandas as pd
 
-    print("Load customers")
-    # real code here
+    df = pd.read_parquet(in_path)
+    print(f"Loaded {len(df)} customers, total spend = {df['spend'].sum()}")
 
 
 def main():
-    extract_customers()
-    clean_customers()
-    load_customers()
+    # CLI run: stage in ./data and keep the files so you can open the parquet output.
+    load_customers(clean_customers(extract_customers(DATA_DIR)))
 
 
-# =========================================================
-# Airflow mode: TaskFlow API + @task.external_python
-# Reuses the same separated business-logic functions above: wrap them with
-# task.external_python so they run under the EXTERNAL_PYTHON venv interpreter.
-# The decorator captures each function's source (inspect.getsource); since the
-# functions are self-contained (imports inside), they run fine in the venv.
-# =========================================================
+# === Airflow mode ===
+# __name__ guard: `python demo.py` runs CLI only and never builds the DAG (even with Airflow
+# installed). Airflow imports the file as a module, which is when the DAG registers.
+# Same 3 steps as main(), wrapped to run under the venv; only parquet PATHS flow through XCom.
 
-try:
+if __name__ == "__main__":
+    main()
+else:
     from airflow.sdk import dag, task
 
+    default_args = {
+        "owner": "Airflow",
+        "retries": 3,
+        "retry_delay": timedelta(minutes=1),
+    }
+
     @dag(
-        dag_id="customer_pipeline_taskapi",
+        dag_id="demo_pipeline",
         start_date=datetime(2026, 1, 1),
         schedule="@daily",
         catchup=False,
         tags=["customer"],
+        default_args=default_args,
     )
     def customer_pipeline_taskapi():
         extract = task.external_python(python=EXTERNAL_PYTHON)(extract_customers)
         clean = task.external_python(python=EXTERNAL_PYTHON)(clean_customers)
         load = task.external_python(python=EXTERNAL_PYTHON)(load_customers)
 
-        extract() >> clean() >> load()
+        load(clean(extract(DATA_DIR)))  # same shape as main()
 
     customer_pipeline_taskapi()
-except ModuleNotFoundError:
-    pass
-
-
-if __name__ == "__main__":
-    main()

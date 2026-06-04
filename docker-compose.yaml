@@ -34,6 +34,9 @@ x-airflow-common:
     # Git connections (SSH), one per git bundle. Each only used when its GIT_REPO_URL_n is set.
     AIRFLOW_CONN_GIT_1: '{"conn_type": "git", "host": "${GIT_REPO_URL_1:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_1_key", "strict_host_key_checking": "no"}}'
     AIRFLOW_CONN_GIT_2: '{"conn_type": "git", "host": "${GIT_REPO_URL_2:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_2_key", "strict_host_key_checking": "no"}}'
+    # Interpreter of the business-logic venv (the airflow-pyenv volume below), used by
+    # ExternalPythonOperator / @task.external_python. Fixed wiring tied to that volume.
+    EXTERNAL_PYTHON: /opt/airflow/pyenv/venv/bin/python3
   volumes:
     # Primary DAGs folder (bundle "dags-folder").
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
@@ -48,6 +51,9 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+    # Shared working area for large data passed between tasks (see dags/demo.py).
+    # Tasks exchange parquet file PATHS via XCom; the data itself lives here on disk.
+    - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
     # Dedicated venv for business logic (used by ExternalPythonOperator).
     # Fully isolated from Airflow's own env, so Airflow stays stable.
     # Install extra packages anytime; they persist across restarts, no rebuild:
@@ -68,11 +74,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
       interval: 10s
@@ -83,13 +84,10 @@ services:
   airflow-apiserver:
     <<: *airflow-common
     command: api-server
+    # Direct host access (LOCAL mode). Comment this out in domain mode: Traefik fronts the UI,
+    # and freeing host port 8080 avoids clashing with Traefik's own dashboard on 8080.
     ports:
-      - "127.0.0.1:8080:8080"
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
+      - "8080:8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
       interval: 30s
@@ -101,16 +99,28 @@ services:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
+    # --- Reverse proxy (Traefik) — OFF by default; the stack deploys standalone on
+    # 127.0.0.1:8080 (see ports above). To route a public domain through Traefik:
+    #   1. docker network create proxy_net   (a shared external network with your Traefik)
+    #   2. set AIRFLOW_HOST in .env
+    #   3. comment out the "ports" block above (Traefik fronts the UI; this also frees host
+    #      port 8080, which Traefik's dashboard uses)
+    #   4. uncomment the two blocks below AND the proxy_net network at the bottom of this file
+
+    # networks:
+    #   - default      # keep internal connectivity (postgres + scheduler) alongside the proxy
+    #   - proxy_net
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.airflow.rule=Host(`${AIRFLOW_HOST}`)"
+    #   - "traefik.http.routers.airflow.entrypoints=websecure"
+    #   - "traefik.http.routers.airflow.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.airflow.loadbalancer.server.port=8080"
+    #   - "traefik.docker.network=proxy_net"
 
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
-    deploy:
-      resources:
-        limits:
-          # LocalExecutor runs tasks directly on the scheduler, so it needs more resources
-          cpus: '8'
-          memory: 6G
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
@@ -126,11 +136,6 @@ services:
   airflow-dag-processor:
     <<: *airflow-common
     command: dag-processor
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
       interval: 30s
@@ -146,11 +151,6 @@ services:
   airflow-triggerer:
     <<: *airflow-common
     command: triggerer
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 30s
@@ -169,7 +169,7 @@ services:
     command:
       - -c
       - |
-        mkdir -v -p /opt/airflow/{logs,dags,plugins,config,pyenv}
+        mkdir -v -p /opt/airflow/{logs,dags,plugins,config,pyenv,data}
         /entrypoint airflow version
         /entrypoint airflow config list >/dev/null
         # Create the business-logic venv if it doesn't exist (idempotent: re-running won't recreate it).
@@ -183,7 +183,7 @@ services:
         fi
         # chown only the dirs we own; avoid recursing into /opt/airflow/git-ssh
         # (read-only key mounts would error with "Read-only file system").
-        chown -v -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config,pyenv}
+        chown -v -R "${AIRFLOW_UID}:0" /opt/airflow/{logs,dags,plugins,config,pyenv,data}
     environment:
       <<: *airflow-common-env
       _AIRFLOW_DB_MIGRATE: 'true'
@@ -210,3 +210,9 @@ services:
 volumes:
   postgres-db-volume:
   airflow-pyenv:
+
+# Uncomment together with the Traefik block on airflow-apiserver to route a public domain.
+# proxy_net is shared with your Traefik instance, so create it first: docker network create proxy_net
+#networks:
+#  proxy_net:
+#    external: true
