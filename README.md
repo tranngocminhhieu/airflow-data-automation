@@ -1,33 +1,36 @@
 # Airflow Data Automation
 
-Single-server Apache Airflow (LocalExecutor) for **BI / Analytics Engineers** who know
-Python + Cron and want a real orchestrator without heavy infrastructure.
+Single-server Apache Airflow (LocalExecutor) for **BI / Analytics Engineers** who already write
+Python + Cron jobs and want a real orchestrator without heavy infrastructure.
 
-The twist: pipeline business logic runs in a **dedicated Python venv, isolated from Airflow**.
-Install pipeline packages anytime — **no image rebuild, no Airflow restart** — while Airflow
-stays stable.
+The core idea: your pipeline logic runs in a **dedicated Python venv, isolated from Airflow**. You
+`pip install` whatever your pipelines need — **anytime, no image rebuild, no Airflow restart** —
+and Airflow itself stays untouched and stable.
 
-## Highlights
+## Features
 
-- **Lean**: Docker, one server, a few commands.
-- **1 pipeline = 1 Python file**: runs as a CLI (`python file.py`) and as an Airflow DAG.
-- **Isolated venv** (`/opt/airflow/pyenv/venv`): never touches Airflow's own env.
-- **`pip install` anytime**: no rebuild/restart; packages persist on a Docker volume.
-- **Multiple DAG sources**: extra host folders or git repos (SSH) as separate bundles, via `.env`.
+- **1 pipeline = 1 Python file** that runs two ways: `python file.py` for a local test, and as a
+  scheduled Airflow DAG — same code, same steps.
+- **Isolated venv** for business logic; `pip install` persists on a volume, takes effect on the
+  next run.
+- **Large data between tasks** via parquet files in `./data` (not XCom).
+- **Many DAG sources**: the default `./dags`, extra host folders, or git repos over SSH — each a
+  separate bundle, all configured in `.env`.
+- **Optional public domain** with HTTPS through an existing Traefik proxy.
 
 ## Architecture
 
 | Service | Role |
 |---|---|
 | `postgres` | Metadata database |
-| `airflow-apiserver` | Web UI + REST API (`127.0.0.1:8080`) |
-| `airflow-scheduler` | Schedules + runs tasks (LocalExecutor runs them here) |
-| `airflow-dag-processor` | Parses DAGs |
-| `airflow-triggerer` | Deferrable operators |
-| `airflow-init` | DB migrate, admin user, builds the business-logic venv |
+| `airflow-apiserver` | Web UI + REST API (host `:8080`) |
+| `airflow-scheduler` | Schedules and runs tasks (LocalExecutor runs them here) |
+| `airflow-dag-processor` | Parses DAG files |
+| `airflow-triggerer` | Runs deferrable operators |
+| `airflow-init` | One-shot: DB migrate, admin user, builds the business-logic venv |
 
-Business logic runs via `@task.external_python`, pointed at the venv interpreter instead of
-Airflow's Python:
+Pipeline code runs through `@task.external_python`, pointed at the venv interpreter — never
+Airflow's own Python:
 
 ```
 ┌───────────────────────────────┐
@@ -36,82 +39,80 @@ Airflow's Python:
 └───────────────────────────────┘        ↑ pip install freely, persists on a volume
 ```
 
-Full definition: [`docker-compose.yaml`](docker-compose.yaml).
-
 ## Quick start
 
-Requires Docker + Docker Compose (production: Linux server).
+Needs Docker + Docker Compose (production: a Linux server).
 
 ```shell
-cp .env_example .env          # then fill in REPLACE_WITH_... values
-docker compose up airflow-init  # first-time init
+cp .env_example .env     # fill in every REPLACE_WITH_... value
+docker compose up airflow-init   # first run only: DB + admin user + venv
 docker compose up -d
 ```
 
-Open http://127.0.0.1:8080 and log in with the admin account from `.env`.
+Open http://localhost:8080 and log in with the admin account from `.env`.
 
-Generate a fresh `FERNET_KEY` before deploying:
+## Configuration
+
+Everything lives in `.env`; each variable is documented inline in
+[`.env_example`](.env_example). What you must set:
+
+- **Secrets** — `FERNET_KEY` (generate below), `AIRFLOW__API_AUTH__JWT_SECRET`, Postgres
+  credentials, and the web admin user/password.
+- **Tuning** (optional) — `AIRFLOW__CORE__PARALLELISM` and the `MAX_ACTIVE_*` limits.
 
 ```shell
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-## Layout
-
-```
-.
-├── docker-compose.yaml   # All services
-├── .env_example          # Config template → copy to .env
-├── .placeholder_ssh_key  # Default git-bundle key mount when disabled
-└── dags/demo.py          # Sample pipeline (CLI + Airflow)
-```
-
-Every config var is documented inline in [`.env_example`](.env_example).
-
 ## Writing a DAG
 
-One Python file, two modes — see [`dags/demo.py`](dags/demo.py):
+A pipeline is one Python file (see [`dags/demo.py`](dags/demo.py)) built from **self-contained
+functions**: every `import` goes *inside* the function and the body uses no outer-scope names.
+That's required — `@task.external_python` ships the function's *source* to the venv interpreter,
+so anything defined outside it won't exist at run time.
 
-- **Business logic = self-contained functions**: all `import`s *inside* the function, no
-  outer-scope references. `@task.external_python` runs the function's *source*
-  (`inspect.getsource`) under the venv interpreter, where outer names don't exist.
-- **Airflow mode** wraps those functions with `task.external_python(python=EXTERNAL_PYTHON)`,
-  inside `try/except ModuleNotFoundError` so the file still runs as a plain CLI script.
+The same file runs two ways, split by an `__name__` guard:
 
-```shell
-python dags/demo.py   # quick logic test, no Airflow
+```python
+if __name__ == "__main__":
+    main()                      # `python dags/demo.py` — local test, no Airflow
+else:                           # Airflow imports the file as a module → register the DAG here
+    extract = task.external_python(python=EXTERNAL_PYTHON)(extract_customers)
+    # ... wire the steps into a @dag
 ```
 
-### Large data between tasks
+So you develop and test the logic locally, then drop the file in `dags/` and Airflow schedules it
+with the **same steps** — nothing to rewrite. `EXTERNAL_PYTHON` is provided by the stack
+(`docker-compose.yaml`), pointing at the venv.
 
-In plain Python, `load(clean(extract()))` just passes an in-memory reference — free. In Airflow,
-each task is a separate process, so data between them must be serialized. The default channel is
-**XCom (the metadata DB) — for small metadata only**, never a 100K-row frame.
+### Passing large data between tasks
 
-Pattern (see `demo.py`): each step writes its output as **parquet** under `./data` and returns
-only the **file path**; the next step reads it. Only the small path travels through XCom; the data
-stays on disk. The DAG has the **same 3 steps as the CLI** (`extract → clean → load`) — no extra
-orchestration tasks.
+In plain Python `load(clean(extract()))` just hands over an in-memory object. In Airflow each task
+is a separate process, so data must be serialized — and **XCom goes through the metadata DB, for
+small values only**, never a 100K-row frame.
 
-The working dir resolves to `./data` everywhere: `/opt/airflow/data` inside the container is a
-host bind mount, so the files also show up in the repo's `./data` — and a host run
-(`python dags/demo.py`) writes the same `./data`. Inspect (or delete) the parquet anytime.
+Pattern: each step writes its output as **parquet** under `./data` and returns just the **file
+path**; the next step reads it. Only the path travels through XCom; the data stays on disk. The
+DAG keeps the **same 3 steps as the local run** — no extra plumbing tasks.
 
-> This relies on LocalExecutor (all tasks of a run share one filesystem). With multiple workers,
-> point the working dir at shared storage (NFS / object storage) instead. If runs can overlap,
-> namespace the path (e.g. per run) so they don't clobber each other.
+`./data` is the same place everywhere: `/opt/airflow/data` in the container is a host bind mount,
+so the files also appear in the repo's `./data`, and a local `python dags/demo.py` writes there
+too. Open or delete the parquet anytime.
+
+> Works because LocalExecutor runs all of a run's tasks in one container. With multiple workers,
+> use shared storage (NFS / object storage); if runs overlap, namespace the path per run.
 
 ## Python environment
 
-A venv with `apache-airflow` (matching the image) is prebuilt at `/opt/airflow/pyenv/venv` on a
-volume, so it persists across restarts. Add packages (effective next task run):
+The venv at `/opt/airflow/pyenv/venv` ships with only `apache-airflow`. Install what your
+pipelines need; it persists across restarts and applies on the next task run:
 
 ```shell
-docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install <package>
+docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install pandas pyarrow
 ```
 
-Separate venv for a special pipeline — create under `/opt/airflow/pyenv/`, install
-`apache-airflow` at the same version, then point the DAG's `EXTERNAL_PYTHON` at it:
+Need a different dependency set for one pipeline? Make a second venv next to it and point that
+DAG's `EXTERNAL_PYTHON` at the new interpreter:
 
 ```shell
 docker compose exec airflow-scheduler python -m venv /opt/airflow/pyenv/venv-special
@@ -120,63 +121,58 @@ docker compose exec airflow-scheduler /opt/airflow/pyenv/venv-special/bin/pip in
 
 ## DAG sources (bundles)
 
-Default folder is `./dags` (bundle `dags-folder`). Other sources become their own named
-**DAG bundle** (Airflow 3), shown separately in the UI. All driven from `.env`; wiring in
-[`AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST`](docker-compose.yaml).
+The default folder is `./dags` (bundle `dags-folder`). Each extra source is registered as its own
+named **bundle** (Airflow 3), shown separately in the UI — all configured in `.env`.
 
 > ⚠️ `dag_id` must be **unique across all bundles**.
 
 ### Extra host folders
 
-Set `DAGS_FOLDER_2` / `DAGS_FOLDER_3` in `.env` → bundles `dags-folder-2` / `-3`. Each mounts
-outside `/opt/airflow/dags` so the primary bundle doesn't double-scan; unused slots are harmless.
+Set `DAGS_FOLDER_2` / `DAGS_FOLDER_3` in `.env` → bundles `dags-folder-2` / `-3`. Unused slots are
+harmless.
 
-> macOS: folders outside Docker Desktop's shared paths need adding under
+> macOS: a folder outside Docker Desktop's shared paths must be added under
 > **Settings → Resources → File Sharing**.
 
-### Git bundles (SSH)
+### Git repos (SSH)
 
-A bundle can pull DAGs straight from a git remote (`GitDagBundle`) — Airflow clones and pulls
-every `refresh_interval`. Two slots (`git-1`, `git-2`), off by default.
+A bundle can pull DAGs straight from a git remote — Airflow clones and re-pulls on a schedule. Two
+slots (`git-1`, `git-2`), off by default. Create a read-only deploy key:
 
 ```shell
-# 1. Deploy key (no passphrase)
 ssh-keygen -t ed25519 -C "airflow-git-1" -f ~/.ssh/airflow_git_1 -N ""
 chmod 600 ~/.ssh/airflow_git_1
 ```
 
-- private key `~/.ssh/airflow_git_1` → `GIT_SSH_KEY_1`
-- public key `.pub` → repo's read-only **deploy key** (GitHub/GitLab)
-
-Then uncomment + fill the `GIT_*_1` block in `.env` and `docker compose up -d`. A bundle is added
-only when `GIT_REPO_URL_n` is set, so blank slots cause no error. `strict_host_key_checking: no`
-is set, so no `known_hosts` needed.
+Point `GIT_SSH_KEY_1` at the private key, add the `.pub` as a deploy key on GitHub/GitLab, then
+fill the `GIT_*_1` block in `.env` and `docker compose up -d`. A slot activates only when its
+`GIT_REPO_URL_n` is set, so blank slots cause no error.
 
 ## Public domain via Traefik (optional)
 
-Off by default (UI on `127.0.0.1:8080` only). To serve a public domain with HTTPS via an existing
-[Traefik](https://traefik.io/) reverse proxy:
+Off by default. To serve the UI on a public domain with HTTPS through an existing
+[Traefik](https://traefik.io/) proxy:
 
 ```shell
-docker network create proxy_net   # shared network your Traefik is on
-# .env:  AIRFLOW_HOST=airflow.example.com
+docker network create proxy_net    # the shared network your Traefik is on
+# in .env:  AIRFLOW_HOST=airflow.example.com
 ```
 
-In `docker-compose.yaml`, on `airflow-apiserver`: **comment out `ports`**, **uncomment** the
-`networks` + `labels` block and the `proxy_net` network at the bottom — then `docker compose up -d`.
+Then in `docker-compose.yaml` on `airflow-apiserver`: comment out the `ports` block and uncomment
+the `networks` + `labels` block and the `proxy_net` network at the bottom — then
+`docker compose up -d`. The apiserver stays on `default` (to reach postgres + scheduler) and also
+joins `proxy_net` (for Traefik).
 
-The apiserver joins both `default` (to reach postgres + scheduler) and `proxy_net` (for Traefik).
-Labels assume network `proxy_net`, entrypoint `websecure`, resolver `letsencrypt` — match them to
-your Traefik's config (mismatched names are the usual cause of 404s). Point DNS at the host;
-Traefik issues the cert once `:80`/`:443` are reachable.
+> The labels assume network `proxy_net`, entrypoint `websecure`, resolver `letsencrypt` — change
+> them to match your Traefik. Point the domain's DNS at the host; the cert issues automatically.
 
 ## Operations
 
 ```shell
 docker compose exec airflow-scheduler airflow dags list                 # list DAGs + bundles
-docker compose exec airflow-scheduler airflow dags list-import-errors   # import errors
-docker compose exec airflow-scheduler airflow dags trigger <dag_id>     # manual trigger
+docker compose exec airflow-scheduler airflow dags list-import-errors   # find parse errors
+docker compose exec airflow-scheduler airflow dags trigger <dag_id>     # run now
 docker compose logs -f airflow-scheduler                                # tail logs
 docker compose down        # stop
-docker compose down -v     # stop + drop volumes (loses venv + metadata DB)
+docker compose down -v     # stop + wipe volumes (loses the venv + metadata DB)
 ```
