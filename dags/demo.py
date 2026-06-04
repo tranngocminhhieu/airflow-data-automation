@@ -62,7 +62,6 @@ else:
         "retry_delay": timedelta(minutes=1),
     }
 
-
     @dag(
         dag_id="demo_pipeline",
         start_date=datetime(2026, 1, 1),
