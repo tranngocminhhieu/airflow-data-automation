@@ -37,6 +37,7 @@ x-airflow-common:
     # Interpreter of the business-logic venv (the airflow-pyenv volume below), used by
     # ExternalPythonOperator / @task.external_python. Fixed wiring tied to that volume.
     EXTERNAL_PYTHON: /opt/airflow/pyenv/venv/bin/python3
+    DATA_DIR: /opt/airflow/data
     # Object Storage XCom backend: XCom values larger than the threshold are offloaded to the
     # filesystem (/opt/airflow/data/xcom) instead of the metadata DB; values <= threshold stay in
     # the DB. Lets tasks return/accept DataFrames directly (see dags/demo_xcom_storage.py).
