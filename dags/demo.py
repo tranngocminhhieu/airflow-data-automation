@@ -56,11 +56,6 @@ else:
 
     EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON")
 
-    default_args = {
-        "owner": "Airflow",
-        "retries": 3,
-        "retry_delay": timedelta(minutes=1),
-    }
 
     @dag(
         dag_id="demo_pipeline",
@@ -68,7 +63,7 @@ else:
         schedule="@daily",
         catchup=False,
         tags=["customer"],
-        default_args=default_args,
+        default_args={"owner": "Airflow", "retries": 1, "retry_delay": timedelta(minutes=1)}
     )
     def customer_pipeline_taskapi():
         extract = task.external_python(python=EXTERNAL_PYTHON)(extract_customers)

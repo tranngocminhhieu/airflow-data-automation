@@ -13,7 +13,7 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET:-airflow_jwt_secret}
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
@@ -37,6 +37,18 @@ x-airflow-common:
     # Interpreter of the business-logic venv (the airflow-pyenv volume below), used by
     # ExternalPythonOperator / @task.external_python. Fixed wiring tied to that volume.
     EXTERNAL_PYTHON: /opt/airflow/pyenv/venv/bin/python3
+    # Object Storage XCom backend: XCom values larger than the threshold are offloaded to the
+    # filesystem (/opt/airflow/data/xcom) instead of the metadata DB; values <= threshold stay in
+    # the DB. Lets tasks return/accept DataFrames directly (see dags/demo_xcom_storage.py).
+    AIRFLOW__CORE__XCOM_BACKEND: airflow.providers.common.io.xcom.backend.XComObjectStorageBackend
+    AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_PATH: file:///opt/airflow/data/xcom
+    AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_THRESHOLD: '1048576'   # 1 MiB; MUST be > -1 (-1 disables offload)
+    AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_COMPRESSION: gzip      # works out-of-the-box; do NOT use snappy
+    # NOTE: Airflow's base env needs pandas+pyarrow to (de)serialize DataFrames returned by
+    # external_python tasks before the backend offloads them. The apache/airflow image already
+    # ships both (pulled in by its bundled providers), so no extra install is required here.
+
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW__CORE__DEFAULT_TIMEZONE:-utc}
   volumes:
     # Primary DAGs folder (bundle "dags-folder").
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
@@ -169,7 +181,7 @@ services:
     command:
       - -c
       - |
-        mkdir -v -p /opt/airflow/{logs,dags,plugins,config,pyenv,data}
+        mkdir -v -p /opt/airflow/{logs,dags,plugins,config,pyenv,data,data/xcom}
         /entrypoint airflow version
         /entrypoint airflow config list >/dev/null
         # Create the business-logic venv if it doesn't exist (idempotent: re-running won't recreate it).
@@ -190,7 +202,6 @@ services:
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
-      _PIP_ADDITIONAL_REQUIREMENTS: ''
     user: "0:0"
 
   airflow-cli:

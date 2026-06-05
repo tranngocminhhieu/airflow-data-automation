@@ -88,16 +88,34 @@ with the **same steps** — nothing to rewrite. `EXTERNAL_PYTHON` is provided by
 ### Passing large data between tasks
 
 In plain Python `load(clean(extract()))` just hands over an in-memory object. In Airflow each task
-is a separate process, so data must be serialized — and **XCom goes through the metadata DB, for
-small values only**, never a 100K-row frame.
+is a separate process, so data must be serialized — and **plain XCom goes through the metadata DB,
+for small values only**, never a 100K-row frame. There are two ways to handle big data here:
 
-Pattern: each step writes its output as **parquet** under `./data` and returns just the **file
-path**; the next step reads it. Only the path travels through XCom; the data stays on disk. The
-DAG keeps the **same 3 steps as the local run** — no extra plumbing tasks.
+**1. Parquet path** — [`dags/demo.py`](dags/demo.py). Each step writes its output as parquet under
+`./data` and returns just the **file path**; the next step reads it. Only the path travels through
+XCom; the data stays on disk. Explicit, and the base Airflow env stays lean.
 
 `./data` is the same place everywhere: `/opt/airflow/data` in the container is a host bind mount,
 so the files also appear in the repo's `./data`, and a local `python dags/demo.py` writes there
 too. Open or delete the parquet anytime.
+
+**2. Object Storage XCom backend** — [`dags/demo_xcom_storage.py`](dags/demo_xcom_storage.py).
+Tasks `return df` and accept `df` directly (the ergonomic `load(clean(extract()))` style); the
+backend transparently offloads any XCom **larger than the threshold** to `./data/xcom` and keeps
+small values in the DB. Configured globally in `docker-compose.yaml`
+(`AIRFLOW__CORE__XCOM_BACKEND` + `AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_*`: path, `THRESHOLD`
+1 MiB, `gzip`). Airflow re-materializes the returned frame in its own process before offloading it,
+so the base env also needs pandas + pyarrow — the `apache/airflow` image already ships both, so no
+extra install is required.
+
+Use **1** when you want the base image lean; use **2** when you'd rather pass DataFrames directly
+and let the backend manage spillover. Both keep the **same 3 steps as the local run**.
+
+> The backend only deletes an offloaded file when its XCom row is deleted (task re-run, run/TI
+> deleted) — it never expires files by age. [`dags/cleanup_xcom.py`](dags/cleanup_xcom.py)
+> (`maintenance_cleanup`) is a `@daily` DAG that handles the things Airflow grows but never
+> auto-cleans: it prunes `./data/xcom` and `./logs` by age and runs `airflow db clean` on old
+> metadata. Retention is set by the `*_RETENTION_DAYS` constants at the top of the file.
 
 > Works because LocalExecutor runs all of a run's tasks in one container. With multiple workers,
 > use shared storage (NFS / object storage); if runs overlap, namespace the path per run.
