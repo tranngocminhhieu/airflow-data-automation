@@ -1,4 +1,4 @@
-# Airflow Data Automation
+# Airflow Local Runtime
 
 Apache Airflow (LocalExecutor) for **BI Engineers** who are comfortable with Python + Cron but want
 a real orchestrator for monitoring — without changing how they work, and without standing up heavy
