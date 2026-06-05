@@ -28,6 +28,7 @@ x-airflow-common:
       {"name": "git-1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_1", "tracking_ref": "${GIT_TRACKING_REF_1:-main}", "subdir": "${GIT_SUBDIR_1:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_1:-60}}}}${GIT_REPO_URL_2:+,
       {"name": "git-2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_2", "tracking_ref": "${GIT_TRACKING_REF_2:-main}", "subdir": "${GIT_SUBDIR_2:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_2:-60}}}}
       ]
+    # AIRFLOW_CONN_<CONN_ID>, Airflow will identify <CONN_ID> to <git_conn_id>
     AIRFLOW_CONN_GIT_1: '{"conn_type": "git", "host": "${GIT_REPO_URL_1:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_1_key", "strict_host_key_checking": "no"}}'
     AIRFLOW_CONN_GIT_2: '{"conn_type": "git", "host": "${GIT_REPO_URL_2:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_2_key", "strict_host_key_checking": "no"}}'
 
@@ -36,7 +37,7 @@ x-airflow-common:
     # the DB. Lets tasks return/accept DataFrames directly (see dags/demo_xcom_storage.py).
     AIRFLOW__CORE__XCOM_BACKEND: airflow.providers.common.io.xcom.backend.XComObjectStorageBackend
     AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_PATH: file:///opt/airflow/data/xcom
-    AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_THRESHOLD: '1048576'   # 1 MiB; MUST be > -1 (-1 disables offload)
+    AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_THRESHOLD: '1048576'   # 1 MB; MUST be > -1 (-1 disables offload)
     AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_COMPRESSION: gzip      # works out-of-the-box; do NOT use snappy
 
     # Help variable
@@ -44,7 +45,7 @@ x-airflow-common:
     DATA_DIR: /opt/airflow/data
 
   volumes:
-    # Default dirs
+    # Airflow basis dirs
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
@@ -116,16 +117,16 @@ services:
     #      port 8080, which Traefik's dashboard uses)
     #   4. uncomment the two blocks below AND the proxy_net network at the bottom of this file
 
-    # networks:
-    #   - default      # keep internal connectivity (postgres + scheduler) alongside the proxy
-    #   - proxy_net
-    # labels:
-    #   - "traefik.enable=true"
-    #   - "traefik.http.routers.airflow.rule=Host(`${AIRFLOW_HOST}`)"
-    #   - "traefik.http.routers.airflow.entrypoints=websecure"
-    #   - "traefik.http.routers.airflow.tls.certresolver=letsencrypt"
-    #   - "traefik.http.services.airflow.loadbalancer.server.port=8080"
-    #   - "traefik.docker.network=proxy_net"
+#    networks:
+#     - default      # keep internal connectivity (postgres + scheduler) alongside the proxy
+#     - proxy_net
+#    labels:
+#     - "traefik.enable=true"
+#     - "traefik.http.routers.airflow.rule=Host(`${AIRFLOW_HOST}`)"
+#     - "traefik.http.routers.airflow.entrypoints=websecure"
+#     - "traefik.http.routers.airflow.tls.certresolver=letsencrypt"
+#     - "traefik.http.services.airflow.loadbalancer.server.port=8080"
+#     - "traefik.docker.network=proxy_net"
 
   airflow-scheduler:
     <<: *airflow-common
