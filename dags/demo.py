@@ -52,17 +52,17 @@ if __name__ == "__main__":
 
 # === Airflow mode ===
 else:
+    from functools import partial
     from airflow.sdk import dag, task
 
-    EXTERNAL_PYTHON = os.getenv("EXTERNAL_PYTHON")
-
+    task_extpy = partial(task.external_python, python=os.getenv("EXTERNAL_PYTHON"))
 
     @dag(
         dag_id="demo_pipeline",
         start_date=datetime(2026, 1, 1),
         schedule="@daily",
         catchup=False,
-        tags=["customer"],
+        tags=["demo"],
         default_args={"owner": "Airflow", "retries": 1, "retry_delay": timedelta(minutes=1)}
     )
     def customer_pipeline_taskapi():

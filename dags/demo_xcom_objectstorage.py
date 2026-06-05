@@ -58,7 +58,7 @@ else:
         start_date=datetime(2026, 1, 1),
         schedule="@daily",
         catchup=False,
-        tags=["customer"],
+        tags=["demo"],
         default_args={"owner": "Airflow", "retries": 1, "retry_delay": timedelta(minutes=1)}
     )
     def customer_pipeline_xcom_storage():
