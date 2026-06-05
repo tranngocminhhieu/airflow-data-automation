@@ -17,12 +17,9 @@ x-airflow-common:
     AIRFLOW__API_AUTH__JWT_ISSUER: ${AIRFLOW__API_AUTH__JWT_ISSUER:-airflow}
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-    # DAG bundles: each is a separate, named bundle (shown individually in the UI).
-    # Local: "dags-folder" (primary, /opt/airflow/dags) + extra2/extra3 (additional folders).
-    # Git: git-1/git-2 are appended ONLY when their GIT_REPO_URL_n is set in .env (via ${VAR:+...}),
-    # so leaving them unset means no git bundle and no errors.
-    # Written multi-line for readability via a YAML folded scalar (>-): YAML joins the lines with
-    # spaces into one string before Compose interpolates, so the result is the same as one long line.
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW__CORE__DEFAULT_TIMEZONE:-utc}
+
+    # DAG bundles
     AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
       [
       {"name": "dags-folder", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {}},
@@ -31,13 +28,9 @@ x-airflow-common:
       {"name": "git-1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_1", "tracking_ref": "${GIT_TRACKING_REF_1:-main}", "subdir": "${GIT_SUBDIR_1:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_1:-60}}}}${GIT_REPO_URL_2:+,
       {"name": "git-2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_2", "tracking_ref": "${GIT_TRACKING_REF_2:-main}", "subdir": "${GIT_SUBDIR_2:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_2:-60}}}}
       ]
-    # Git connections (SSH), one per git bundle. Each only used when its GIT_REPO_URL_n is set.
     AIRFLOW_CONN_GIT_1: '{"conn_type": "git", "host": "${GIT_REPO_URL_1:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_1_key", "strict_host_key_checking": "no"}}'
     AIRFLOW_CONN_GIT_2: '{"conn_type": "git", "host": "${GIT_REPO_URL_2:-}", "extra": {"key_file": "/opt/airflow/git-ssh/git_2_key", "strict_host_key_checking": "no"}}'
-    # Interpreter of the business-logic venv (the airflow-pyenv volume below), used by
-    # ExternalPythonOperator / @task.external_python. Fixed wiring tied to that volume.
-    EXTERNAL_PYTHON: /opt/airflow/pyenv/venv/bin/python3
-    DATA_DIR: /opt/airflow/data
+
     # Object Storage XCom backend: XCom values larger than the threshold are offloaded to the
     # filesystem (/opt/airflow/data/xcom) instead of the metadata DB; values <= threshold stay in
     # the DB. Lets tasks return/accept DataFrames directly (see dags/demo_xcom_storage.py).
@@ -45,14 +38,18 @@ x-airflow-common:
     AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_PATH: file:///opt/airflow/data/xcom
     AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_THRESHOLD: '1048576'   # 1 MiB; MUST be > -1 (-1 disables offload)
     AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_COMPRESSION: gzip      # works out-of-the-box; do NOT use snappy
-    # NOTE: Airflow's base env needs pandas+pyarrow to (de)serialize DataFrames returned by
-    # external_python tasks before the backend offloads them. The apache/airflow image already
-    # ships both (pulled in by its bundled providers), so no extra install is required here.
 
-    AIRFLOW__CORE__DEFAULT_TIMEZONE: ${AIRFLOW__CORE__DEFAULT_TIMEZONE:-utc}
+    # Help variable
+    EXTERNAL_PYTHON: /opt/airflow/pyenv/venv/bin/python3
+    DATA_DIR: /opt/airflow/data
+
   volumes:
-    # Primary DAGs folder (bundle "dags-folder").
+    # Default dirs
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+
     # Extra DAG folders as separate bundles (see AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST above).
     # Mounted OUTSIDE /opt/airflow/dags so the primary bundle doesn't scan them twice.
     # Unused slots default to an auto-created empty dir (no DAGs, harmless).
@@ -61,12 +58,11 @@ x-airflow-common:
     # SSH private keys for the git bundles (read-only), one per bundle. Set GIT_SSH_KEY_n in .env.
     - ${GIT_SSH_KEY_1:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git_1_key:ro
     - ${GIT_SSH_KEY_2:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git_2_key:ro
-    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
-    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+
     # Shared working area for large data passed between tasks (see dags/demo.py).
     # Tasks exchange parquet file PATHS via XCom; the data itself lives here on disk.
     - ${AIRFLOW_PROJ_DIR:-.}/data:/opt/airflow/data
+
     # Dedicated venv for business logic (used by ExternalPythonOperator).
     # Fully isolated from Airflow's own env, so Airflow stays stable.
     # Install extra packages anytime; they persist across restarts, no rebuild:
