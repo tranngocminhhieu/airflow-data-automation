@@ -12,6 +12,8 @@ All you need is:
 - Write each DAG to run in **two modes** (CLI and Airflow), if you want to keep running plain Python
 - Install extra packages into the External Python Environment when you need them
 
+> Airflow will consume approximately **1.5GB** of RAM for all its services when idle.
+
 ## Features
 
 1. **A ready-made External Python Environment**\
