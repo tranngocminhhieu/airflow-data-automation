@@ -4,8 +4,8 @@ from datetime import datetime, timedelta
 
 from airflow.sdk import dag, task
 
-XCOM_RETENTION_DAYS = 3   # data/xcom files (like data: keep short)
-LOG_RETENTION_DAYS = 30    # task log text (heavy, rarely re-read)
+XCOM_RETENTION_DAYS = 3
+LOG_RETENTION_DAYS = 30
 
 def _prune_dir(base, retention_days):
     """Delete files older than retention_days under base, drop emptied subdirs, return a summary."""
@@ -46,7 +46,6 @@ def _prune_dir(base, retention_days):
 def maintenance_cleanup():
     @task
     def prune_xcom():
-        # Single source of truth: the backend's configured path (strip the file:// scheme).
         path = os.getenv("AIRFLOW__COMMON_IO__XCOM_OBJECTSTORAGE_PATH", "file:///opt/airflow/data/xcom")
         print(_prune_dir(path.split("://", 1)[-1], XCOM_RETENTION_DAYS))
 
