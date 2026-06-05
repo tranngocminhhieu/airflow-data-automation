@@ -2,15 +2,7 @@ import os
 from datetime import datetime, timedelta
 
 
-# === Business logic ===
-# Tasks return/accept pandas DataFrames directly. The Object Storage XCom backend
-# (configured in docker-compose.yaml) offloads any XCom larger than the threshold to
-# /opt/airflow/data/xcom instead of the metadata DB -- so no manual parquet paths.
-# pandas + pyarrow must be installed in BOTH:
-#   - the Airflow base env (compose: _PIP_ADDITIONAL_REQUIREMENTS) -> to (de)serialize the frame
-#   - the business-logic venv -> so the task code runs:
-#     docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install pandas pyarrow
-
+# === Business logic (CLI mode) ===
 def extract_customers():
     import numpy as np
     import pandas as pd
@@ -62,9 +54,9 @@ else:
         default_args={"owner": "Airflow", "retries": 1, "retry_delay": timedelta(minutes=1)}
     )
     def customer_pipeline_xcom_storage():
-        extract = task_extpy()(extract_customers)
-        clean = task_extpy()(clean_customers)
-        load = task_extpy()(load_customers)
+        extract = task(extract_customers)      # Airflow Environment: pandas, pyarrow included
+        clean = task_extpy()(clean_customers)  # External Python Environment: need to install pandas, pyarrow
+        load = task_extpy()(load_customers)    # External Python Environment: need to install pandas, pyarrow
 
         load(clean(extract()))
 

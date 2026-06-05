@@ -2,10 +2,7 @@ import os
 from datetime import datetime, timedelta
 
 
-# === Business logic ===
-# pandas + pyarrow aren't in the default venv; install once:
-# docker compose exec airflow-scheduler /opt/airflow/pyenv/venv/bin/pip install pandas pyarrow
-
+# === Business logic (CLI mode) ===
 def extract_customers(workdir):
     import pandas as pd
 
@@ -66,10 +63,10 @@ else:
         default_args={"owner": "Airflow", "retries": 1, "retry_delay": timedelta(minutes=1)}
     )
     def customer_pipeline_taskapi():
-        extract = task.external_python(python=EXTERNAL_PYTHON)(extract_customers)
-        clean = task.external_python(python=EXTERNAL_PYTHON)(clean_customers)
-        load = task.external_python(python=EXTERNAL_PYTHON)(load_customers)
+        extract = task(extract_customers)     # Airflow Environment: pandas, pyarrow included
+        clean = task_extpy()(clean_customers) # External Python Environment: need to install pandas, pyarrow
+        load = task_extpy()(load_customers)   # External Python Environment: need to install pandas, pyarrow
 
-        load(clean(extract('/opt/airflow/data')))
+        load(clean(extract(os.getenv('DATA_DIR')))) # /opt/airflow/data
 
     customer_pipeline_taskapi()
