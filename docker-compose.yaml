@@ -23,8 +23,8 @@ x-airflow-common:
     AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
       [
       {"name": "dags-folder", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {}},
-      {"name": "dags-folder-2", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-2"}},
-      {"name": "dags-folder-3", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/dags-folder-3"}}${GIT_REPO_URL_1:+,
+      {"name": "local-1", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/local-1"}},
+      {"name": "local-2", "classpath": "airflow.dag_processing.bundles.local.LocalDagBundle", "kwargs": {"path": "/opt/airflow/extra-dags/local-2"}}${GIT_REPO_URL_1:+,
       {"name": "git-1", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_1", "tracking_ref": "${GIT_TRACKING_REF_1:-main}", "subdir": "${GIT_SUBDIR_1:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_1:-60}}}}${GIT_REPO_URL_2:+,
       {"name": "git-2", "classpath": "airflow.providers.git.bundles.git.GitDagBundle", "kwargs": {"git_conn_id": "git_2", "tracking_ref": "${GIT_TRACKING_REF_2:-main}", "subdir": "${GIT_SUBDIR_2:-dags}", "refresh_interval": ${GIT_REFRESH_INTERVAL_2:-60}}}}
       ]
@@ -54,8 +54,8 @@ x-airflow-common:
     # Extra DAG folders as separate bundles (see AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST above).
     # Mounted OUTSIDE /opt/airflow/dags so the primary bundle doesn't scan them twice.
     # Unused slots default to an auto-created empty dir (no DAGs, harmless).
-    - ${DAGS_FOLDER_2:-./.extra_dags/dags-folder-2}:/opt/airflow/extra-dags/dags-folder-2
-    - ${DAGS_FOLDER_3:-./.extra_dags/dags-folder-3}:/opt/airflow/extra-dags/dags-folder-3
+    - ${LOCAL_DAGS_1:-./.extra_dags/local-1}:/opt/airflow/extra-dags/local-1
+    - ${LOCAL_DAGS_2:-./.extra_dags/local-2}:/opt/airflow/extra-dags/local-2
     # SSH private keys for the git bundles (read-only), one per bundle. Set GIT_SSH_KEY_n in .env.
     - ${GIT_SSH_KEY_1:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git_1_key:ro
     - ${GIT_SSH_KEY_2:-./.placeholder_ssh_key}:/opt/airflow/git-ssh/git_2_key:ro

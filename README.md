@@ -84,7 +84,7 @@ In [docker-compose.yaml](docker-compose.yaml):
 
 #### LocalDagBundle
 
-Set the absolute path of your DAG folder in `DAGS_FOLDER_2` / `DAGS_FOLDER_3` in
+Set the absolute path of your DAG folder in `LOCAL_DAGS_1` / `LOCAL_DAGS_2` in
 [.env_example](.env_example).
 
 #### GitDagBundle
