@@ -111,3 +111,15 @@ Adjust `RETENTION_DAYS` to the number of days you want to keep, then add it to y
 ```shell
 0 0 * * * /path/to/cleanup-airflow-metadata.sh
 ```
+
+### Check Airflow base requirements
+
+You don't need the External Python Environment if the packages you need already ship with Airflow.
+
+[airflow-base-requirements.txt](airflow-base-requirements.txt) lists the Python libraries bundled with
+Airflow 3.2.2. Regenerate it with:
+
+```shell
+docker compose exec -T airflow-scheduler \
+  python -m pip freeze > airflow-base-requirements.txt
+```
